@@ -20,8 +20,6 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 
-COPY lder /opt/venv /opt/venv
-
 COPY . .
 
 ENV PATH="/opt/venv/bin:$PATH"
