@@ -35,13 +35,13 @@ jobs:
 
       - name: Build Local Image
         run: |
-          docker build -t ${{ env.DOCKER_IMAGE }}:${{ steps.vars.outputs.sha_short }} .
-          docker tag ${{ env.DOCKER_IMAGE }}:${{ steps.vars.outputs.sha_short }} ${{ env.DOCKER_IMAGE }}:latest
+          docker build -t ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }} .
+          docker tag ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }} ${{ env.IMAGE_NAME }}:latest
 
       - name: Trivy Vulnerability Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '${{ env.DOCKER_IMAGE }}:${{ steps.vars.outputs.sha_short }}'
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }}'
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
@@ -57,5 +57,5 @@ jobs:
       - name: Push Images to Docker Hub
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          docker push ${{ env.DOCKER_IMAGE }}:${{ steps.vars.outputs.sha_short }}
-          docker push ${{ env.DOCKER_IMAGE }}:latest
+          docker push ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }}
+          docker push ${{ env.IMAGE_NAME }}:latest
