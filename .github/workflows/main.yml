@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/two-tier-flask-app
+  IMAGE_NAME: ${{ secrets.DOCKER_HUB_USERNAME }}/two-tier-flask-app
 
 jobs:
   lint-and-test:
@@ -51,8 +51,8 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
       - name: Push Images to Docker Hub
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
