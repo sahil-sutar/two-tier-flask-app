@@ -55,11 +55,4 @@ networks:
 
 
 
-volumes:
-  mysql-data:
-
-networks:
-  twotier:
-
-
 
