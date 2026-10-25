@@ -1,6 +1,7 @@
 name: CD & Automated Rollback Release
 
 on:
+  workflow_dispatch:
   workflow_run:
     workflows: ["CI & Docker Hub Release"]
     branches: [main]
