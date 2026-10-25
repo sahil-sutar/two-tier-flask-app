@@ -1,0 +1,102 @@
+name: CD & Automated Rollback Release
+
+on:
+  workflow_run:
+    workflows: ["CI & Docker Hub Release"]
+    branches: [main]
+    types: [completed]
+
+jobs:
+  deploy:
+    name: Deploy & Verify Production on EC2
+    runs-on: ubuntu-latest
+    # Run only if the CI workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Compute Target Commit SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Execute Deployment & Health Verification via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          TARGET_TAG: ${{ steps.vars.outputs.sha_short }}
+          REPO_NAME: two-tier-flask-app
+          APP_DIR: /home/ubuntu/two-tier-flask-app
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DOCKER_USER,DOCKER_TOKEN,TARGET_TAG,REPO_NAME,APP_DIR
+          script: |
+            set -euo pipefail
+            cd "$APP_DIR"
+
+            # 1. Authenticate with Docker Hub on EC2
+            echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+
+            # 2. Capture currently deployed running image tag for rollback
+            PREV_IMAGE=$(docker inspect --format='{{.Config.Image}}' flask-app 2>/dev/null || echo "")
+            if [ -n "$PREV_IMAGE" ]; then
+              PREV_TAG=$(echo "$PREV_IMAGE" | awk -F':' '{print $2}')
+            else
+              PREV_TAG=""
+            fi
+            echo "Current running tag checkpoint: $PREV_TAG"
+
+            # 3. Pull target versioned image from Docker Hub
+            NEW_IMAGE="$DOCKER_USER/$REPO_NAME:$TARGET_TAG"
+            echo "Pulling target image: $NEW_IMAGE"
+            docker pull "$NEW_IMAGE"
+
+            # 4. Deploy the new web container while preserving the MySQL service and volume
+            echo "Deploying new version $TARGET_TAG..."
+            export DOCKER_USERNAME="$DOCKER_USER"
+            export APP_TAG="$TARGET_TAG"
+            docker compose up -d flask-app
+
+            # 5. 60-Second Health Check Polling Loop (12 checks x 5s)
+            echo "Starting 60-second health check polling against http://127.0.0.1:5000/health..."
+            HEALTHY=false
+            for i in $(seq 1 12); do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/health || true)
+              if [ "$HTTP_CODE" -eq 200 ]; then
+                echo "Health check PASSED on attempt $i ($((i * 5))s elapsed)."
+                HEALTHY=true
+                break
+              fi
+              echo "Attempt $i: Received HTTP $HTTP_CODE. Retrying in 5 seconds..."
+              sleep 5
+            done
+
+            # 6. Automated Rollback Condition
+            if [ "$HEALTHY" = false ]; then
+              echo "CRITICAL: Health check failed within 60s window. Commencing automated rollback."
+
+              if [ -n "$PREV_TAG" ]; then
+                echo "Reverting container to previous stable tag: $PREV_TAG"
+                export APP_TAG="$PREV_TAG"
+                docker compose up -d flask-app
+
+                # Verify rollback health
+                sleep 5
+                ROLLBACK_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/health || true)
+                if [ "$ROLLBACK_CODE" -eq 200 ]; then
+                  echo "Rollback succeeded. System restored to tag: $PREV_TAG"
+                else
+                  echo "CRITICAL: Rollback image failed verification."
+                fi
+              else
+                echo "No previous stable image found to rollback to."
+              fi
+              exit 1
+            fi
+
+            # 7. Clean up unused images to prevent disk exhaustion
+            docker image prune -f
+            echo "Deployment verified and finalized successfully."
